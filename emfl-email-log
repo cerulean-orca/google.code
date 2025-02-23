@@ -1,0 +1,120 @@
+function processEMLFiles() {
+  try {
+    // Get the active spreadsheet
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let sheet = ss.getSheetByName('Email Data');
+
+    // If the sheet doesn't exist, create it
+    if (!sheet) {
+      sheet = ss.insertSheet('Email Data');
+      // Set up headers if the sheet was newly created
+      const headers = ['Filename', 'From', 'To', 'Date Sent'];
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    }
+
+    //Find the last row
+    const lastRow = sheet.getLastRow();
+
+    //Find the row where the data should start
+    let row = lastRow + 1;
+
+    // Get the folder containing the EML files
+    const files = getEMLFilesFromFolder();
+
+    if (!files) {
+      Logger.log('No files found in the specified folder.');
+
+      // Show a popup notification
+      SpreadsheetApp.getUi().alert('No EML files found in the specified folder.  Please check the folder name in the script.');
+
+      return; // Exit the script if no files are found
+    }
+
+    let processedFiles = 0;
+
+    // Process each EML file
+    while (files.hasNext()) {
+      const file = files.next();
+      Logger.log('Processing file: ' + file.getName());
+
+      try {
+        const content = file.getBlob().getDataAsString();
+
+        // Extract and clean metadata
+        const filename = file.getName();
+        const from = cleanEmailField(extractHeader(content, 'From'));
+        const to = cleanEmailField(extractHeader(content, 'To'));
+        const date = extractHeader(content, 'Date');
+
+        // Write to spreadsheet
+        sheet.getRange(row, 1, 1, 4).setValues([[
+          filename,
+          from,
+          to,
+          date
+        ]]);
+
+        row++;
+        processedFiles++;
+      } catch (fileError) {
+        Logger.log('Error processing file ' + file.getName() + ': ' + fileError.toString());
+        continue;
+      }
+    }
+
+    Logger.log('Processing complete! Processed ' + processedFiles + ' files');
+
+    // Auto-resize columns to fit content
+    sheet.autoResizeColumns(1, headers.length);
+
+  } catch (error) {
+    Logger.log('Error: ' + error.toString());
+    throw error;
+  }
+}
+
+function getEMLFilesFromFolder() {
+  // ********************************************************************
+  // ** IMPORTANT:  Replace "Your Folder Name Here" with the EXACT name
+  // **            of the folder containing the EML files. Case-sensitive!
+  // ********************************************************************
+  const folderName = "Sent 17-21 BG.TR"; // <---  CHANGE THIS EACH DAY
+
+  try {
+    const folder = DriveApp.getRootFolder().getFoldersByName(folderName);
+
+    if (folder.hasNext()) {
+      return folder.next().getFilesByType('message/rfc822'); // Only EML files
+    } else {
+      Logger.log('Folder "' + folderName + '" not found.');
+      return null;
+    }
+  } catch (error) {
+    Logger.log('Error getting folder: ' + error.toString());
+    return null;
+  }
+}
+
+function extractHeader(content, headerName) {
+  const regex = new RegExp(`^${headerName}: (.*)$`, 'mi');
+  const match = content.match(regex);
+  return match ? match[1].trim() : '';
+}
+
+function cleanEmailField(emailString) {
+  if (!emailString) return '';
+
+  // Handle both formats: "Name <email>" and "<email>"
+  let cleanedString = emailString;
+
+  // Strip any quotes at the beginning and end
+  cleanedString = cleanedString.replace(/^"|"$/g, '');
+
+  // Extract just the email address if it's in angle brackets
+  const emailMatch = cleanedString.match(/<([^>]+)>/);
+  if (emailMatch) {
+    return emailMatch[1]; // Return just the email address without brackets
+  }
+
+  return cleanedString;
+}
